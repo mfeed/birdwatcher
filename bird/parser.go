@@ -28,6 +28,7 @@ var (
 			numericValue *regexp.Regexp
 			routes       *regexp.Regexp
 			stringValue  *regexp.Regexp
+			capsValue    *regexp.Regexp
 			routeChanges *regexp.Regexp
 			short        *regexp.Regexp
 		}
@@ -76,6 +77,7 @@ func init() {
 	regex.protocol.numericValue = regexp.MustCompile(`^\s+([^:]+):\s+([\d]+)\s*$`)
 	regex.protocol.routes = regexp.MustCompile(`^\s+Routes:\s+(.*)`)
 	regex.protocol.stringValue = regexp.MustCompile(`^\s+([^:]+):\s+(.+)\s*$`)
+	regex.protocol.capsValue = regexp.MustCompile(`^\s\s\s\s+(.+)$`)
 	regex.protocol.routeChanges = regexp.MustCompile(`(Import|Export) (updates|withdraws):\s+(\d+|---)\s+(\d+|---)\s+(\d+|---)\s+(\d+|---)\s+(\d+|---)\s*$`)
 
 	regex.routes.startDefinition = regexp.MustCompile(`^(` + re_prefix + `)\s+via\s+(` + re_ip + `)\s+on\s+(` + re_ifname + `)\s+\[([\w\.:]+)\s+([0-9\-\:\s]+)(?:\s+from\s+(` + re_prefix + `)){0,1}\]\s+(?:(\*)\s+){0,1}\((\d+)(?:\/\d+){0,1}\).*`)
@@ -182,7 +184,6 @@ func parseProtocols(reader io.Reader) Parsed {
 		if emptyString(line) {
 			if !emptyString(proto) {
 				parsed := parseProtocol(proto)
-
 				res[parsed["protocol"].(string)] = parsed
 			}
 			proto = ""
@@ -557,6 +558,7 @@ func isCorrectChannel(currentIPVersion string) bool {
 func parseProtocol(lines string) Parsed {
 	res := Parsed{}
 	routeChanges := Parsed{}
+	neighborCapsRes := Parsed{}
 
 	handlers := []func(string) bool{
 		func(l string) bool { return parseProtocolHeader(l, res) },
@@ -566,14 +568,32 @@ func parseProtocol(lines string) Parsed {
 		func(l string) bool { return parseProtocolStringValuesRx(l, res) },
 	}
 
+	neighborCapsHandlers := []func(string) bool{
+		func(l string) bool { return parseProtocolNeighborCapsValuesRx(l, res, neighborCapsRes) },
+	}
+
 	ipVersion := ""
 
 	reader := strings.NewReader(lines)
 	scanner := bufio.NewScanner(reader)
+	neighborCapsFlg := false
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		if m := regex.protocol.channel.FindStringSubmatch(line); len(m) > 0 {
+		if line == "    Neighbor capabilities" {
+			neighborCapsFlg = true
+			continue
+		}
+
+		if neighborCapsFlg == true {
+			if line == "    Session:          external route-server AS4" {
+				neighborCapsFlg = false
+			} else {
+				parseLine(line, neighborCapsHandlers)
+				continue
+			}
+
+		} else if m := regex.protocol.channel.FindStringSubmatch(line); len(m) > 0 {
 			ipVersion = m[1]
 		}
 
@@ -679,6 +699,22 @@ func parseProtocolStringValuesRx(line string, res Parsed) bool {
 
 	key := treatKey(groups[1])
 	res[key] = groups[2]
+	return true
+}
+
+func parseProtocolNeighborCapsValuesRx(line string, res Parsed, neighborCapsRes Parsed) bool {
+	groups := regex.protocol.stringValue.FindStringSubmatch(line)
+	if groups != nil {
+		neighborCapsRes[treatKey(groups[1])] = groups[2]
+	} else if groups == nil {
+		groups := regex.protocol.capsValue.FindStringSubmatch(line)
+		if groups == nil {
+			return false
+		}
+		neighborCapsRes[treatKey(groups[1])] = ""
+	}
+
+	res["neighbor_capabilities"] = neighborCapsRes
 	return true
 }
 
