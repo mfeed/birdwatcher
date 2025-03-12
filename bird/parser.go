@@ -60,7 +60,7 @@ func init() {
 	const re_ip = `[0-9a-f\.\:]+`
 	const re_prefix = `[0-9a-f\.\:\/]+`
 
-	regex.status.startLine = regexp.MustCompile(`^BIRD\s(.+)\s*$`)
+	regex.status.startLine = regexp.MustCompile(`^BIRD\sv?([0-9\.]+)[a-z0-9\-]*\s*$`)
 	regex.status.routerID = regexp.MustCompile(`^Router\sID\sis\s([0-9\.]+)\s*$`)
 	regex.status.currentServer = regexp.MustCompile(`^Current\sserver\stime\sis\s([0-9\-]+\s[0-9\:\.]+)\s*$`)
 	regex.status.lastReboot = regexp.MustCompile(`^Last\sreboot\son\s([0-9\-]+\s[0-9\:\.]+)\s*$`)
@@ -78,7 +78,7 @@ func init() {
 	regex.protocol.stringValue = regexp.MustCompile(`^\s+([^:]+):\s+(.+)\s*$`)
 	regex.protocol.routeChanges = regexp.MustCompile(`(Import|Export) (updates|withdraws):\s+(\d+|---)\s+(\d+|---)\s+(\d+|---)\s+(\d+|---)\s+(\d+|---)\s*$`)
 
-	regex.routes.startDefinition = regexp.MustCompile(`^(` + re_prefix + `)\s+via\s+(` + re_ip + `)\s+on\s+(` + re_ifname + `)\s+\[([\w\.:]+)\s+([0-9\-\:\s]+)(?:\s+from\s+(` + re_prefix + `)){0,1}\]\s+(?:(\*)\s+){0,1}\((\d+)(?:\/\d+){0,1}|\?\).*`)
+	regex.routes.startDefinition = regexp.MustCompile(`^(` + re_prefix + `)\s+via\s+(` + re_ip + `)\s+on\s+(` + re_ifname + `)\s+\[([\w\.:]+)\s+([0-9\-\:\s]+)(?:\s+from\s+(` + re_prefix + `)){0,1}\]\s+(?:(\*)\s+){0,1}\((\d+)(?:\/\d+){0,1}\).*`)
 	regex.protocol.short = regexp.MustCompile(`^(?:1002\-)?([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([0-9\-]+\s+[0-9\:]+?|[0-9\-]+)\s+(.*?)\s*?$`)
 	regex.routes.second = regexp.MustCompile(`^\s+via\s+(` + re_ip + `)\s+on\s+(` + re_ifname + `)\s+\[([\w\.:]+)\s+([0-9\-\:\s]+)(?:\s+from\s+(` + re_prefix + `)){0,1}\]\s+(?:(\*)\s+){0,1}\((\d+)(?:\/\d+){0,1}\).*$`)
 	regex.routes.routeType = regexp.MustCompile(`^\s+Type:\s+(.*)\s*$`)
@@ -346,6 +346,8 @@ func parseRouteLines(lines []string, position int, ch chan<- blockParsed) {
 			parseMainRouteDetail(regex.routes.startDefinition.FindStringSubmatch(line), route)
 		} else if regex.routes.gatewayBird2.MatchString(line) {
 			parseRoutesGatewayBird2(regex.routes.gatewayBird2.FindStringSubmatch(line), route)
+		} else if regex.routes.interfaceBird2.MatchString(line) {
+			parseRoutesInterfaceBird2(regex.routes.interfaceBird2.FindStringSubmatch(line), route)
 		} else if regex.routes.second.MatchString(line) {
 			routes = append(routes, route)
 
@@ -436,7 +438,10 @@ func parseMainRouteDetailBird2(groups []string, route Parsed, formerPrefix strin
 
 func parseRoutesGatewayBird2(groups []string, route Parsed) {
 	route["gateway"] = groups[1]
-	route["interface"] = groups[2]
+}
+
+func parseRoutesInterfaceBird2(groups []string, route Parsed) {
+	route["interface"] = groups[1]
 }
 
 func parseRoutesSecond(line string, route Parsed) Parsed {
@@ -540,6 +545,10 @@ func parseRoutesCount(reader io.Reader) Parsed {
 func isCorrectChannel(currentIPVersion string) bool {
 	if len(currentIPVersion) == 0 {
 		return true
+	}
+
+	if getBirdVersion() == 2 {
+		return currentIPVersion == "4" || currentIPVersion == "6"
 	}
 
 	return currentIPVersion == IPVersion
